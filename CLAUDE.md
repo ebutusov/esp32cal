@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Image-frame firmware for the LilyGO T5 4.7" e-paper S3 (ESP32-S3, 16MB flash, octal PSRAM). On each wake it downloads a ready-made 960x540 4bpp image (raw, exactly 259200 bytes) from a server over plain HTTP and shows it on the panel. Built with **ESP-IDF** (CMake, project `weather32_epd47`), ported from an Arduino/PlatformIO app that used to be a weather station (leftover: `.pio` in `.gitignore`). The server lives in `server/`.
+Image-frame firmware for the LilyGO T5 4.7" e-paper S3 (ESP32-S3, 16MB flash, octal PSRAM). On each wake it downloads a ready-made 960x540 4bpp image (raw, exactly 259200 bytes) from a server over plain HTTP and shows it on the panel. Built with **ESP-IDF** (CMake, project `cal32_epd47`), ported from an Arduino/PlatformIO app that used to be a weather station (leftover: `.pio` in `.gitignore`). The server lives in `server/`.
 
 ## Code style
 - Indent with tabs, never spaces. Tab width is 2.
@@ -28,7 +28,7 @@ Config is not compiled in. `/spiffs/config.json` (keys `ssid`, `password`, `url`
 
 Single-shot, deep-sleep-driven flow in [main/app_main.cpp](main/app_main.cpp) (`app_main` runs once per wake; `g_boot_counter` in RTC memory survives sleep):
 
-1. `display_init()` then read GPIO 21 (`XPIN_MAINTENANCE`, pulled up). **Low = maintenance mode**: start WiFi SoftAP `WEATHER32`, mDNS, mount SPIFFS, start the HTTP server ([main/mserver.cpp](main/mserver.cpp), serves the SPIFFS files / config UI and accepts config uploads), show connection info on the panel, and return (httpd task keeps running; no sleep; returning from `app_main` is fine in ESP-IDF). Every path that draws must call `epd_poweron()` first (and `epd_clear()` for a fresh screen) — without it the panel stays blank with no error.
+1. `display_init()` then read GPIO 21 (`XPIN_MAINTENANCE`, pulled up). **Low = maintenance mode**: start WiFi SoftAP `CAL32`, mDNS, mount SPIFFS, start the HTTP server ([main/mserver.cpp](main/mserver.cpp), serves the SPIFFS files / config UI and accepts config uploads), show connection info on the panel, and return (httpd task keeps running; no sleep; returning from `app_main` is fine in ESP-IDF). Every path that draws must call `epd_poweron()` first (and `epd_clear()` for a fresh screen) — without it the panel stays blank with no error.
 2. Normal mode: mount SPIFFS → parse `config.json` (cJSON, IDF `json` component) → connect WiFi STA ([main/net_wifi.cpp](main/net_wifi.cpp)) → `updateImage()` downloads the image from `url` straight into the framebuffer (`http_get_to_buffer` in [main/net_http_client.cpp](main/net_http_client.cpp); requires HTTP 200 and exactly 259200 bytes) → WiFi off → on failure the framebuffer is reset to white and an error text is drawn → power on EPD, clear, `display_update()` → `esp_deep_sleep_start()` for `sleep` minutes.
 3. WiFi failure: draws an error (with poweron/clear/update) and `esp_restart()`s once; if the previous reset reason was already `ESP_RST_SW` it sleeps instead to avoid a reboot loop.
 

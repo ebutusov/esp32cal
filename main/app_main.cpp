@@ -20,7 +20,7 @@
 #include "net_wifi.h"
 #include "net_http_client.h"
 
-static const char *TAG = "weather32";
+static const char *TAG = "cal32";
 
 #define XPIN_MAINTENANCE GPIO_NUM_21
 
@@ -123,8 +123,8 @@ extern "C" void app_main(void)
 			ESP_LOGI(TAG, "mDNS responder started");
 		}
 
-		const std::string AP_SSID = "WEATHER32";
-		const std::string AP_PASS = "weather123456789";
+		const std::string AP_SSID = "CAL32";
+		const std::string AP_PASS = "cal123456789";
 
 		ESP_LOGI(TAG, "Starting AP, SSID: %s, PASS: %s", AP_SSID.c_str(), AP_PASS.c_str());
 		std::string ap_ip = wifi_start_softap(AP_SSID, AP_PASS);
