@@ -13,6 +13,7 @@ import datetime
 import glob
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.request
@@ -31,21 +32,68 @@ SUFFIX = ".bin"
 FONT_CANDIDATES = [
 	"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 	"/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+	"/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+	"/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
 	"/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+	"/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
 	"/Library/Fonts/Arial Bold.ttf",
 	"C:/Windows/Fonts/arialbd.ttf",
 ]
 
+# Text that must render without "missing glyph" boxes: accents, Latin Extended
+# (Polish, Czech...), Cyrillic, Greek and the punctuation the layout uses.
+COVERAGE_TEXT = "ąćęłńóśźżĄŁŻěščřžýáíéůúďťňüöäßñçéèêàøåÆ–—…’№Жщюя"
+
+_font_paths = None
+_notdef = {}
+
+
+def _missing_glyph_mask(font):
+	"""Bitmap the font draws for a codepoint it does not have (its .notdef box)."""
+	if id(font) not in _notdef:
+		_notdef[id(font)] = bytes(font.getmask("􏿿"))
+	return _notdef[id(font)]
+
+
+def has_glyphs(font, text=COVERAGE_TEXT):
+	missing = _missing_glyph_mask(font)
+	return all(bytes(font.getmask(ch)) != missing for ch in text)
+
+
+def find_font_paths():
+	"""Candidate TTFs, best first: known bold fonts, fontconfig's pick, any Sans/Bold TTF."""
+	global _font_paths
+	if _font_paths is None:
+		paths = list(FONT_CANDIDATES)
+		try:
+			out = subprocess.run(["fc-match", "-f", "%{file}", "sans:bold"],
+				capture_output=True, text=True, timeout=5).stdout.strip()
+			if out:
+				paths.append(out)
+		except (OSError, subprocess.SubprocessError):
+			pass
+		found = glob.glob("/usr/share/fonts/**/*.ttf", recursive=True)
+		found.sort(key=lambda p: ("bold" not in p.lower(), "sans" not in p.lower(), p))
+		_font_paths = paths + found
+	return _font_paths
+
 
 def load_font(size):
-	paths = FONT_CANDIDATES + glob.glob("/usr/share/fonts/**/*.ttf", recursive=True)
-	for p in paths:
+	fallback = None
+	for p in find_font_paths():
 		try:
-			return ImageFont.truetype(p, size)
+			font = ImageFont.truetype(p, size)
 		except OSError:
 			continue
+		if has_glyphs(font):
+			return font
+		fallback = fallback or font  # exists but lacks some glyphs
+	if fallback:
+		print("warning: no installed font covers all of the expected characters "
+			"(install fonts-dejavu-core or fonts-noto)", file=sys.stderr)
+		return fallback
 	try:
-		return ImageFont.load_default(size)  # Pillow >= 10.1
+		return ImageFont.load_default(size)  # Pillow >= 10.1, ASCII/Latin-1 only
 	except TypeError:
 		return ImageFont.load_default()
 
