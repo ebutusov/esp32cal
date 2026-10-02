@@ -1,7 +1,8 @@
+#include <cstdlib>
 #include <cstdio>
 #include <string>
 
-#include <ArduinoJson.h>
+#include <cJSON.h>
 
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
@@ -167,19 +168,25 @@ extern "C" void app_main(void)
 	buf[n] = '\0';
 	fclose(file);
 
-	StaticJsonDocument<1024> doc;
-	DeserializationError error = deserializeJson(doc, buf, n);
-	if (error)
-	{
+	cJSON *doc = cJSON_ParseWithLength(buf, n);
+	if (!doc) {
 		ESP_LOGW(TAG, "Failed to read file, using default configuration");
-	}
-	else
-	{
-		CONF_WIFI_SSID = doc["ssid"].isNull() ? "FAIL" : doc["ssid"].as<const char *>();
-		CONF_WIFI_PASSWORD = doc["password"].isNull() ? "FAIL" : doc["password"].as<const char *>();
-		CONF_IMAGE_URL = doc["url"].isNull() ? "" : doc["url"].as<const char *>();
-		int sleep_min = doc["sleep"].isNull() ? 15 : doc["sleep"].as<int>();
+	} else {
+		const cJSON *ssid = cJSON_GetObjectItemCaseSensitive(doc, "ssid");
+		const cJSON *password = cJSON_GetObjectItemCaseSensitive(doc, "password");
+		const cJSON *url = cJSON_GetObjectItemCaseSensitive(doc, "url");
+		const cJSON *sleep = cJSON_GetObjectItemCaseSensitive(doc, "sleep");
+		CONF_WIFI_SSID = cJSON_IsString(ssid) ? ssid->valuestring : "FAIL";
+		CONF_WIFI_PASSWORD = cJSON_IsString(password) ? password->valuestring : "FAIL";
+		CONF_IMAGE_URL = cJSON_IsString(url) ? url->valuestring : "";
+		int sleep_min = 15;
+		if (cJSON_IsNumber(sleep)) {
+			sleep_min = sleep->valueint;
+		} else if (cJSON_IsString(sleep)) {
+			sleep_min = atoi(sleep->valuestring);
+		}
 		CONF_SLEEP_TIME = (uint64_t)sleep_min * 60ULL * 1000000ULL;
+		cJSON_Delete(doc);
 	}
 
 	ESP_LOGI(TAG, "Configuration:");
