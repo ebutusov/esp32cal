@@ -21,3 +21,5 @@ venv/
 server/images/
 *.swp
 *.swo
+spiffs_image/
+server/config.json

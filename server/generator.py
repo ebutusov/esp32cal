@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
-"""Renders the 960x540 4bpp e-paper image and writes it to an output directory.
+"""Renders a Google Calendar agenda as a 960x540 4bpp e-paper image.
 
+The calendar is downloaded from a secret ICS URL (config.json, key "ics_url").
 Each run writes a new file image_YYYYmmdd_HHMMSS.bin (atomically) and prunes
-old ones. The web server (server.py) always serves the newest file.
+old ones. The web server (server.py) always serves the newest file. If the
+calendar cannot be fetched, nothing is written and the previous image stays.
 
-Only third-party dependency: Pillow.
+Third-party dependencies: Pillow, icalendar, recurring-ical-events.
 """
 import argparse
 import datetime
 import glob
+import json
 import os
 import sys
 import time
+import urllib.request
 
+import icalendar
+import recurring_ical_events
 from PIL import Image, ImageDraw, ImageFont
 
 WIDTH = 960
 HEIGHT = 540
 IMAGE_SIZE = WIDTH * HEIGHT // 2  # 259200
+ROTATE = 90  # portrait canvas rotated counter-clockwise (90 or 270; 270 = the other mounting direction)
 PREFIX = "image_"
 SUFFIX = ".bin"
 
@@ -43,35 +50,129 @@ def load_font(size):
 		return ImageFont.load_default()
 
 
-def render():
-	"""Return a 960x540 mode "L" image (0 = black, 255 = white). Replace freely."""
-	img = Image.new("L", (WIDTH, HEIGHT), 255)
+def load_config(path):
+	with open(path, encoding="utf-8") as f:
+		cfg = json.load(f)
+	if not cfg.get("ics_url"):
+		raise ValueError('%s: "ics_url" is required' % path)
+	cfg.setdefault("days", 14)
+	return cfg
+
+
+def fetch_events(url, days):
+	"""Return [(start, end, summary, all_day, location)] for today and the next days, sorted.
+
+	Starts at today's local midnight, so events of the current day (even ones
+	already started) are kept and earlier days are dropped.
+	"""
+	with urllib.request.urlopen(url, timeout=20) as r:
+		cal = icalendar.Calendar.from_ical(r.read())
+	today = datetime.datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+	events = []
+	for ev in recurring_ical_events.of(cal).between(today, today + datetime.timedelta(days=days)):
+		start = ev.get("DTSTART").dt
+		end = ev.get("DTEND").dt if ev.get("DTEND") else start
+		all_day = not isinstance(start, datetime.datetime)
+		if not all_day:
+			start = start.astimezone()
+			end = end.astimezone()
+		location = " ".join(str(ev.get("LOCATION", "")).split())
+		events.append((start, end, str(ev.get("SUMMARY", "(no title)")), all_day, location))
+	# within a day: all-day first, then by start time
+	events.sort(key=lambda e: (not e[3], 0 if e[3] else e[0].timestamp()))
+	return events
+
+
+def event_days(ev, today):
+	"""Dates (>= today) an event is shown on; multi-day events repeat on each day."""
+	start, end, _, all_day, _ = ev
+	first = start if all_day else start.date()
+	last = end if all_day else end.date()
+	if all_day or (not all_day and end > start and end.time() == datetime.time(0)):
+		last -= datetime.timedelta(days=1)  # DTEND is exclusive
+	last = max(last, first)
+	d = max(first, today)
+	while d <= last:
+		yield d
+		d += datetime.timedelta(days=1)
+
+
+def day_label(d, today):
+	if d == today:
+		return "Today"
+	if d == today + datetime.timedelta(days=1):
+		return "Tomorrow"
+	return d.strftime("%a %d %b")
+
+
+def fit(d, text, font, max_w):
+	"""Truncate text with an ellipsis so it fits max_w pixels."""
+	if d.textlength(text, font=font) <= max_w:
+		return text
+	while text and d.textlength(text + "…", font=font) > max_w:
+		text = text[:-1]
+	return text.rstrip() + "…"
+
+
+def render(events):
+	"""Return a 960x540 mode "L" image (0 = black, 255 = white): the agenda.
+
+	The agenda is drawn in portrait (540x960) and rotated counter-clockwise by
+	ROTATE degrees so the panel, mounted rotated, shows more rows.
+	"""
+	W, H = HEIGHT, WIDTH  # portrait canvas
+	img = Image.new("L", (W, H), 255)
 	d = ImageDraw.Draw(img)
-	now = datetime.datetime.now()
+	now = datetime.datetime.now().astimezone()
+	today = now.date()
+	margin = 30
+	head_font = load_font(30)
+	row_font = load_font(24)
+	loc_font = load_font(20)
+	small = load_font(18)
+	head_h, row_h, loc_h = 44, 34, 26
+	bottom = H - 30
 
-	d.rectangle((0, 0, WIDTH - 1, HEIGHT - 1), outline=0, width=4)
+	# group per day
+	days = {}
+	for ev in events:
+		for day in event_days(ev, today):
+			days.setdefault(day, []).append(ev)
 
-	big = load_font(150)
-	mid = load_font(44)
-	d.text((WIDTH // 2, 150), now.strftime("%H:%M"), font=big, fill=0, anchor="mm")
-	d.text((WIDTH // 2, 270), now.strftime("%A, %d %B %Y"), font=mid, fill=40, anchor="mm")
+	if not days:
+		d.text((W // 2, H // 2), "No upcoming events", font=head_font, fill=0, anchor="mm")
 
-	# test shapes (asymmetric so orientation/nibble order errors are visible)
-	d.rectangle((40, 330, 160, 400), fill=0)
-	d.ellipse((190, 330, 310, 400), outline=0, width=4)
-	d.polygon([(340, 400), (400, 330), (460, 400)], fill=100)
-	d.line((490, 400, 600, 330), fill=0, width=3)
-	d.text((40, 300), "L", font=load_font(30), fill=0, anchor="ls")
-	d.text((WIDTH - 40, 300), "R", font=load_font(30), fill=0, anchor="rs")
+	y = margin
+	hidden = 0
+	for day in sorted(days):
+		if y + head_h + row_h + loc_h > bottom:
+			hidden += len(days[day])
+			continue
+		d.text((margin, y), day_label(day, today), font=head_font, fill=0)
+		d.line((margin, y + head_h - 4, W - margin, y + head_h - 4), fill=0, width=2)
+		y += head_h
+		evs = days[day]
+		for i, (start, end, title, all_day, location) in enumerate(evs):
+			h = row_h + (loc_h if location else 0)
+			if y + h > bottom:
+				hidden += len(evs) - i
+				break
+			label = "All day" if all_day else "%s–%s" % (start.strftime("%H:%M"), end.strftime("%H:%M"))
+			d.text((margin, y), label, font=row_font, fill=60)
+			x = margin + 160
+			max_w = W - margin - x
+			title = fit(d, title, row_font, max_w)
+			d.text((x, y), title, font=row_font, fill=0)
+			# location in a lighter gray on its own line below the title
+			if location:
+				d.text((x, y + row_h - 4), fit(d, location, loc_font, max_w), font=loc_font, fill=90)
+			y += h
+		y += 8
 
-	# 16-step grayscale bar: step i -> 4bpp nibble i (0 = black ... 15 = white)
-	x0, y0, w, h = 40, 430, 880, 70
-	step = w // 16
-	for i in range(16):
-		g = i * 17
-		d.rectangle((x0 + i * step, y0, x0 + (i + 1) * step - 1, y0 + h), fill=g)
-	d.rectangle((x0, y0, x0 + 16 * step, y0 + h), outline=0, width=1)
-	return img
+	if hidden:
+		d.text((margin, H - 12), "+%d more" % hidden, font=small, fill=0, anchor="ls")
+	d.text((W - margin, H - 12), "updated " + now.strftime("%H:%M"), font=small, fill=90, anchor="rs")
+	return img.rotate(ROTATE, expand=True)
 
 
 def pack_4bpp(img):
@@ -115,9 +216,9 @@ def write_atomic(path, data):
 	os.replace(tmp, path)
 
 
-def generate(out_dir, keep, png):
+def generate(out_dir, keep, png, cfg):
 	os.makedirs(out_dir, exist_ok=True)
-	data = pack_4bpp(render())
+	data = pack_4bpp(render(fetch_events(cfg["ics_url"], cfg["days"])))
 	name = PREFIX + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 	path = os.path.join(out_dir, name + SUFFIX)
 	write_atomic(path, data)
@@ -139,12 +240,21 @@ def main():
 	ap.add_argument("--interval", type=float, default=0, metavar="SEC",
 		help="regenerate every SEC seconds (default: generate once and exit)")
 	ap.add_argument("--keep", type=int, default=5, help="number of images to keep")
+	ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"),
+		help="JSON config with the secret calendar URL (default: config.json next to this script)")
 	ap.add_argument("--png", action="store_true", help="also write a preview PNG next to each image")
 	args = ap.parse_args()
 
+	cfg = load_config(args.config)
 	try:
 		while True:
-			print(generate(args.out_dir, max(1, args.keep), args.png), flush=True)
+			try:
+				print(generate(args.out_dir, max(1, args.keep), args.png, cfg), flush=True)
+			except Exception as e:  # keep the previous image; never print the URL
+				print("generate failed: %s: %s" % (type(e).__name__, str(e).replace(cfg["ics_url"], "<url>")),
+					file=sys.stderr, flush=True)
+				if args.interval <= 0:
+					return 1
 			if args.interval <= 0:
 				break
 			time.sleep(args.interval)
