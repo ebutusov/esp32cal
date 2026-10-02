@@ -18,3 +18,6 @@ spiffs_image/
 __pycache__/
 venv/
 .venv/
+server/images/
+*.swp
+*.swo
