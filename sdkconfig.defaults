@@ -2,7 +2,7 @@
 
 CONFIG_IDF_TARGET="esp32s3"
 
-# Flash: QIO mode, 80MHz, 16MB (matches boards/T5-ePaper-S3.json flash_mode=qio, flash_size=16MB)
+# Flash: QIO mode, 80MHz, 16MB
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

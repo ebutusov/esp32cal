@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Image-frame firmware for the LilyGO T5 4.7" e-paper S3 (ESP32-S3, 16MB flash, octal PSRAM). On each wake it downloads a ready-made 960x540 4bpp image (raw, exactly 259200 bytes) from a server over plain HTTP and shows it on the panel. Built with **ESP-IDF** (CMake, project `weather32_epd47`), ported from an Arduino/PlatformIO app that used to be a weather station (leftovers: `boards/*.json`, `.pio` in `.gitignore`). The server lives in `server/`.
+Image-frame firmware for the LilyGO T5 4.7" e-paper S3 (ESP32-S3, 16MB flash, octal PSRAM). On each wake it downloads a ready-made 960x540 4bpp image (raw, exactly 259200 bytes) from a server over plain HTTP and shows it on the panel. Built with **ESP-IDF** (CMake, project `weather32_epd47`), ported from an Arduino/PlatformIO app that used to be a weather station (leftover: `.pio` in `.gitignore`). The server lives in `server/`.
 
 ## Code style
 - Indent with tabs, never spaces. Tab width is 2.
