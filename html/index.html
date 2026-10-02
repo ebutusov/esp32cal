@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Image Station</title>
+  <meta charset="utf-8">
+  <style>
+    body {
+      background: #fafafa;
+      font-family: Verdana;
+      color: #505050;
+    }
+    label {
+      display: inline-block;
+        width: 150px;
+    }
+
+    input[type="text"], input[type="number"] {
+      border-radius: 5px;
+      border: solid blue 1px;
+      height: 22px;
+      font-size: 16px;
+      margin-bottom: 5px;
+      width: 270px;
+      padding: 2px;
+    }
+
+    .sendbt {
+      font-size: 20px;  
+    }
+
+  </style>
+</head>
+<body>
+  <h1>ESP32 Image Station</h1>
+  <h2>Configuration</h2>
+  <form id="frm">
+    <div class="row">
+      <label class="lbl" for="ssid">WIFI SSID</label>
+      <input type="text" id="ssid" name="ssid">
+    </div>
+    <div class="row">
+      <label for="password">WIFI PASS</label>
+      <input type="text" id="password" name="password">
+    </div>
+    <div class="row">
+      <label for="url">SERVER URL</label>
+      <input type="text" id="url" name="url">
+    </div>
+    <div class="row">
+      <label for="sleep">SLEEP (MIN)</label>
+      <input type="number" id="sleep" name="sleep" min="1">
+    </div>
+    <br>
+  </form>
+
+  <button class="sendbt">Save</button>
+
+  <script>
+
+function callServiceJS(url = ``, data = {}) {
+    return fetch(url, {
+        method: "POST", // *GET, POST, PUT, DELETE, etc.
+        mode: "cors", // no-cors, cors, *same-origin
+        cache: "no-cache", // *default, no-cache, reload, force-cache, only-if-cached
+        credentials: "same-origin", // include, same-origin, *omit
+        headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            // "Content-Type": "application/x-www-form-urlencoded",
+        },
+        redirect: "follow", // manual, *follow, error
+        referrer: "no-referrer", // no-referrer, *client
+        body: JSON.stringify(data), // body data type must match "Content-Type" header
+    })
+    .then(response => response.json()); // parses response to JSON
+}
+
+  function postData(e) {
+    let form = document.forms['frm'];
+    let dt = Object.create(null);
+    dt.ssid = form.ssid.value;
+    dt.password = form.password.value;
+    dt.url = form.url.value;
+    dt.sleep = Number.parseInt(form.sleep.value) || 15;
+    var body = new FormData;
+    body.append('data', JSON.stringify(dt));
+    fetch('/config', {
+        method: 'POST',
+        body
+    }).then(x=>window.location.reload());
+  }
+
+  function getConfig() {
+    fetch('/config.json', {
+      method: 'GET'
+    }).then(d=>d.json()).then(js=>{
+      if (js) {
+        let form = document.forms['frm'];
+        form.ssid.value = js.ssid;
+        form.password.value = js.password;
+        form.url.value = js.url || "";
+        form.sleep.value = js.sleep || 15;
+      }
+    });
+  }
+
+  function boot() {
+    getConfig();
+    let bt = document.querySelector(".sendbt");
+    bt.addEventListener("click", (e) => postData(e));
+  }
+
+  window.addEventListener('DOMContentLoaded', (event) => boot());  
+  </script>
+</body>
+</html>

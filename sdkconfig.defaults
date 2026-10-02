@@ -1,0 +1,32 @@
+# Target: LilyGO T5 ePaper S3 (ESP32-S3, 16MB flash QIO, octal PSRAM OPI, native USB)
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# Flash: QIO mode, 80MHz, 16MB (matches boards/T5-ePaper-S3.json flash_mode=qio, flash_size=16MB)
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Octal PSRAM (OPI) - was -DBOARD_HAS_PSRAM / board memory_type "qio_opi"
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# Custom partition table (no OTA - this app does not self-update)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# CPU frequency (was f_cpu 240000000L)
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# Default (3584 bytes) overflows once WiFi + esp_http_client + JSON parsing
+# all run on the app_main() task in the same call chain - observed as a
+# stack-overflow panic during the first HTTP GET on real hardware.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
+
+# Console over the built-in USB Serial/JTAG peripheral. ARDUINO_USB_MODE=1 in the
+# board file means "Hardware CDC and JTAG" (USB_SERIAL_JTAG), not USB-OTG CDC.
+# Unlike USB-OTG CDC, this port is enumerated by hardware right at reset, so
+# boot logs and the ROM download mode are reachable.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
