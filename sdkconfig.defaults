@@ -25,8 +25,12 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # stack-overflow panic during the first HTTP GET on real hardware.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
 
-# Console over the built-in USB Serial/JTAG peripheral. ARDUINO_USB_MODE=1 in the
-# board file means "Hardware CDC and JTAG" (USB_SERIAL_JTAG), not USB-OTG CDC.
-# Unlike USB-OTG CDC, this port is enumerated by hardware right at reset, so
-# boot logs and the ROM download mode are reachable.
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# Primary console on UART0 (TX=GPIO43, RX=GPIO44), mirrored (output only) to the
+# built-in USB Serial/JTAG peripheral. ARDUINO_USB_MODE=1 in the board file means
+# "Hardware CDC and JTAG" (USB_SERIAL_JTAG), not USB-OTG CDC. Unlike USB-OTG CDC,
+# that port is enumerated by hardware right at reset, so boot logs and the ROM
+# download mode are reachable.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_NUM=0
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
