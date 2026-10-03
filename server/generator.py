@@ -13,7 +13,6 @@ import datetime
 import glob
 import json
 import os
-import subprocess
 import sys
 import time
 import urllib.request
@@ -29,73 +28,12 @@ ROTATE = 90  # portrait canvas rotated counter-clockwise (90 or 270; 270 = the o
 PREFIX = "image_"
 SUFFIX = ".bin"
 
-FONT_CANDIDATES = [
-	"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-	"/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-	"/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-	"/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-	"/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
-	"/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
-	"/Library/Fonts/Arial Bold.ttf",
-	"C:/Windows/Fonts/arialbd.ttf",
-]
-
-# Text that must render without "missing glyph" boxes: accents, Latin Extended
-# (Polish, Czech...), Cyrillic, Greek and the punctuation the layout uses.
-COVERAGE_TEXT = "ąćęłńóśźżĄŁŻěščřžýáíéůúďťňüöäßñçéèêàøåÆ–—…’№Жщюя"
-
-_font_paths = None
-_notdef = {}
-
-
-def _missing_glyph_mask(font):
-	"""Bitmap the font draws for a codepoint it does not have (its .notdef box)."""
-	if id(font) not in _notdef:
-		_notdef[id(font)] = bytes(font.getmask("􏿿"))
-	return _notdef[id(font)]
-
-
-def has_glyphs(font, text=COVERAGE_TEXT):
-	missing = _missing_glyph_mask(font)
-	return all(bytes(font.getmask(ch)) != missing for ch in text)
-
-
-def find_font_paths():
-	"""Candidate TTFs, best first: known bold fonts, fontconfig's pick, any Sans/Bold TTF."""
-	global _font_paths
-	if _font_paths is None:
-		paths = list(FONT_CANDIDATES)
-		try:
-			out = subprocess.run(["fc-match", "-f", "%{file}", "sans:bold"],
-				capture_output=True, text=True, timeout=5).stdout.strip()
-			if out:
-				paths.append(out)
-		except (OSError, subprocess.SubprocessError):
-			pass
-		found = glob.glob("/usr/share/fonts/**/*.ttf", recursive=True)
-		found.sort(key=lambda p: ("bold" not in p.lower(), "sans" not in p.lower(), p))
-		_font_paths = paths + found
-	return _font_paths
+# Bundled font (see fonts/LICENSE-DejaVu.txt) so rendering is identical on every platform.
+FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "DejaVuSans-Bold.ttf")
 
 
 def load_font(size):
-	fallback = None
-	for p in find_font_paths():
-		try:
-			font = ImageFont.truetype(p, size)
-		except OSError:
-			continue
-		if has_glyphs(font):
-			return font
-		fallback = fallback or font  # exists but lacks some glyphs
-	if fallback:
-		print("warning: no installed font covers all of the expected characters "
-			"(install fonts-dejavu-core or fonts-noto)", file=sys.stderr)
-		return fallback
-	try:
-		return ImageFont.load_default(size)  # Pillow >= 10.1, ASCII/Latin-1 only
-	except TypeError:
-		return ImageFont.load_default()
+	return ImageFont.truetype(FONT_PATH, size)
 
 
 def load_config(path):
@@ -147,9 +85,9 @@ def event_days(ev, today):
 
 def day_label(d, today):
 	if d == today:
-		return "Today"
+		return "Today " + d.strftime("%a %d %b")
 	if d == today + datetime.timedelta(days=1):
-		return "Tomorrow"
+		return "Tomorrow " + d.strftime("%a %d %b")
 	return d.strftime("%a %d %b")
 
 
@@ -175,10 +113,10 @@ def render(events):
 	today = now.date()
 	margin = 30
 	head_font = load_font(30)
-	row_font = load_font(24)
+	row_font = load_font(28)
 	loc_font = load_font(20)
 	small = load_font(18)
-	head_h, row_h, loc_h = 44, 34, 26
+	head_h, row_h, loc_h, ev_gap = 44, 40, 26, 14
 	bottom = H - 30
 
 	# group per day
@@ -205,16 +143,16 @@ def render(events):
 			if y + h > bottom:
 				hidden += len(evs) - i
 				break
-			label = "All day" if all_day else "%s–%s" % (start.strftime("%H:%M"), end.strftime("%H:%M"))
+			label = "All day" if all_day else "%s" % (start.strftime("%H:%M"))
 			d.text((margin, y), label, font=row_font, fill=60)
-			x = margin + 160
+			x = margin + 115
 			max_w = W - margin - x
 			title = fit(d, title, row_font, max_w)
 			d.text((x, y), title, font=row_font, fill=0)
 			# location in a lighter gray on its own line below the title
 			if location:
-				d.text((x, y + row_h - 4), fit(d, location, loc_font, max_w), font=loc_font, fill=90)
-			y += h
+				d.text((x, y + row_h - 6), fit(d, location, loc_font, max_w), font=loc_font, fill=90)
+			y += h + ev_gap
 		y += 8
 
 	if hidden:
