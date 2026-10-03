@@ -111,7 +111,7 @@ def render(events):
 	d = ImageDraw.Draw(img)
 	now = datetime.datetime.now().astimezone()
 	today = now.date()
-	margin = 30
+	margin = 20
 	head_font = load_font(30)
 	row_font = load_font(28)
 	loc_font = load_font(20)
