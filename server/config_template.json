@@ -1,4 +1,6 @@
 {
-	"ics_url": "https://calendar.google.com/calendar/ical/XXXX/private-XXXX/basic.ics",
-	"days": 14
+	"calendars": ["primary"],
+	"days": 14,
+	"client_secret": "client_secret.json",
+	"token": "token.json"
 }

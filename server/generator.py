@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Renders a Google Calendar agenda as a 960x540 4bpp e-paper image.
 
-The calendar is downloaded from a secret ICS URL (config.json, key "ics_url").
+Events are read from the Google Calendar API with OAuth (read-only scope).
+Authorize once with --auth: it opens the Google consent page and stores a
+refresh token in token.json; later runs refresh the access token silently.
 Each run writes a new file image_YYYYmmdd_HHMMSS.bin (atomically) and prunes
 old ones. The web server (server.py) always serves the newest file. If the
 calendar cannot be fetched, nothing is written and the previous image stays.
 
-Third-party dependencies: Pillow, icalendar, recurring-ical-events.
+Third-party dependencies: Pillow, google-auth, google-auth-oauthlib.
 """
 import argparse
 import datetime
@@ -15,16 +17,20 @@ import json
 import os
 import sys
 import time
-import urllib.request
+import urllib.parse
 
-import icalendar
-import recurring_ical_events
+from google.auth.exceptions import RefreshError
+from google.auth.transport.requests import AuthorizedSession, Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from PIL import Image, ImageDraw, ImageFont
 
 WIDTH = 960
 HEIGHT = 540
 IMAGE_SIZE = WIDTH * HEIGHT // 2  # 259200
 ROTATE = 90  # portrait canvas rotated counter-clockwise (90 or 270; 270 = the other mounting direction)
+SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+API = "https://www.googleapis.com/calendar/v3"
 PREFIX = "image_"
 SUFFIX = ".bin"
 
@@ -37,33 +43,80 @@ def load_font(size):
 
 
 def load_config(path):
+	"""Read config.json; client_secret/token paths are relative to its directory."""
 	with open(path, encoding="utf-8") as f:
 		cfg = json.load(f)
-	if not cfg.get("ics_url"):
-		raise ValueError('%s: "ics_url" is required' % path)
+	base = os.path.dirname(os.path.abspath(path))
 	cfg.setdefault("days", 14)
+	cfg.setdefault("calendars", ["primary"])
+	cfg["client_secret"] = os.path.join(base, cfg.get("client_secret", "client_secret.json"))
+	cfg["token"] = os.path.join(base, cfg.get("token", "token.json"))
 	return cfg
 
 
-def fetch_events(url, days):
+def save_token(path, creds):
+	write_atomic(path, creds.to_json().encode("utf-8"))
+
+
+def authorize(cfg, port, open_browser):
+	"""Interactive OAuth consent (Desktop app flow); stores the refresh token."""
+	flow = InstalledAppFlow.from_client_secrets_file(cfg["client_secret"], SCOPES)
+	# prompt=consent makes Google return a refresh token even on re-authorization
+	creds = flow.run_local_server(port=port, open_browser=open_browser, prompt="consent")
+	save_token(cfg["token"], creds)
+	print("token saved to %s" % cfg["token"])
+
+
+def load_credentials(cfg):
+	if not os.path.exists(cfg["token"]):
+		raise RuntimeError("%s not found, run with --auth first" % cfg["token"])
+	creds = Credentials.from_authorized_user_file(cfg["token"], SCOPES)
+	if not creds.valid:
+		creds.refresh(Request())
+		save_token(cfg["token"], creds)
+	return creds
+
+
+def parse_time(t):
+	"""API start/end -> (date or aware local datetime, all_day)."""
+	if "date" in t:
+		return datetime.date.fromisoformat(t["date"]), True
+	return datetime.datetime.fromisoformat(t["dateTime"]).astimezone(), False
+
+
+def fetch_events(session, calendars, days):
 	"""Return [(start, end, summary, all_day, location)] for today and the next days, sorted.
 
 	Starts at today's local midnight, so events of the current day (even ones
-	already started) are kept and earlier days are dropped.
+	already started) are kept and earlier days are dropped. Recurring events are
+	expanded by the API (singleEvents). All-day end dates are exclusive, as in ICS.
 	"""
-	with urllib.request.urlopen(url, timeout=20) as r:
-		cal = icalendar.Calendar.from_ical(r.read())
 	today = datetime.datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+	params = {
+		"timeMin": today.isoformat(),
+		"timeMax": (today + datetime.timedelta(days=days)).isoformat(),
+		"singleEvents": "true",
+		"orderBy": "startTime",
+		"maxResults": 250,
+	}
 	events = []
-	for ev in recurring_ical_events.of(cal).between(today, today + datetime.timedelta(days=days)):
-		start = ev.get("DTSTART").dt
-		end = ev.get("DTEND").dt if ev.get("DTEND") else start
-		all_day = not isinstance(start, datetime.datetime)
-		if not all_day:
-			start = start.astimezone()
-			end = end.astimezone()
-		location = " ".join(str(ev.get("LOCATION", "")).split())
-		events.append((start, end, str(ev.get("SUMMARY", "(no title)")), all_day, location))
+	for cal_id in calendars:
+		url = "%s/calendars/%s/events" % (API, urllib.parse.quote(cal_id, safe=""))
+		params.pop("pageToken", None)
+		while True:
+			r = session.get(url, params=params, timeout=20)
+			r.raise_for_status()
+			data = r.json()
+			for item in data.get("items", []):
+				if item.get("status") == "cancelled":
+					continue
+				start, all_day = parse_time(item["start"])
+				end = parse_time(item["end"])[0] if "end" in item else start
+				location = " ".join(item.get("location", "").split())
+				events.append((start, end, item.get("summary", "(no title)"), all_day, location))
+			if not data.get("nextPageToken"):
+				break
+			params["pageToken"] = data["nextPageToken"]
 	# within a day: all-day first, then by start time
 	events.sort(key=lambda e: (not e[3], 0 if e[3] else e[0].timestamp()))
 	return events
@@ -204,7 +257,8 @@ def write_atomic(path, data):
 
 def generate(out_dir, keep, png, cfg):
 	os.makedirs(out_dir, exist_ok=True)
-	data = pack_4bpp(render(fetch_events(cfg["ics_url"], cfg["days"])))
+	session = AuthorizedSession(load_credentials(cfg))
+	data = pack_4bpp(render(fetch_events(session, cfg["calendars"], cfg["days"])))
 	name = PREFIX + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 	path = os.path.join(out_dir, name + SUFFIX)
 	write_atomic(path, data)
@@ -227,18 +281,25 @@ def main():
 		help="regenerate every SEC seconds (default: generate once and exit)")
 	ap.add_argument("--keep", type=int, default=5, help="number of images to keep")
 	ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"),
-		help="JSON config with the secret calendar URL (default: config.json next to this script)")
+		help="JSON config (default: config.json next to this script)")
 	ap.add_argument("--png", action="store_true", help="also write a preview PNG next to each image")
+	ap.add_argument("--auth", action="store_true", help="authorize Google Calendar access (once) and exit")
+	ap.add_argument("--auth-port", type=int, default=8090, help="local port for the OAuth redirect (default 8090)")
+	ap.add_argument("--no-browser", action="store_true",
+		help="with --auth: only print the consent URL (headless, use an SSH tunnel to --auth-port)")
 	args = ap.parse_args()
 
 	cfg = load_config(args.config)
+	if args.auth:
+		authorize(cfg, args.auth_port, not args.no_browser)
+		return 0
 	try:
 		while True:
 			try:
 				print(generate(args.out_dir, max(1, args.keep), args.png, cfg), flush=True)
-			except Exception as e:  # keep the previous image; never print the URL
-				print("generate failed: %s: %s" % (type(e).__name__, str(e).replace(cfg["ics_url"], "<url>")),
-					file=sys.stderr, flush=True)
+			except Exception as e:  # keep the previous image
+				hint = "; run with --auth again" if isinstance(e, RefreshError) else ""
+				print("generate failed: %s: %s%s" % (type(e).__name__, e, hint), file=sys.stderr, flush=True)
 				if args.interval <= 0:
 					return 1
 			if args.interval <= 0:

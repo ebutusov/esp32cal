@@ -23,3 +23,5 @@ server/images/
 *.swo
 spiffs_image/
 server/config.json
+server/client_secret*.json
+server/token.json
