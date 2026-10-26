@@ -210,7 +210,7 @@ def render(events):
 
 	if hidden:
 		d.text((margin, H - 12), "+%d more" % hidden, font=small, fill=0, anchor="ls")
-	d.text((W - margin, H - 12), "updated " + now.strftime("%H:%M"), font=small, fill=90, anchor="rs")
+	d.text((W - margin, H - 12), "updated " + now.strftime("%d/%m %H:%M"), font=small, fill=90, anchor="rs")
 	return img.rotate(ROTATE, expand=True)
 
 
